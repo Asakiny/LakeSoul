@@ -44,12 +44,26 @@ opt-level = 1
 
 [workspace.dependencies]
 # datafusion
-datafusion = { version = "54" }
+# Keep default-features off so consumers (e.g. Sail) that intentionally disable
+# the `sql` feature on datafusion-expr are not forced to enable it via feature
+# unification when depending on lakesoul-io.
+datafusion = { version = "54", default-features = false, features = [
+  "nested_expressions",
+  "crypto_expressions",
+  "datetime_expressions",
+  "encoding_expressions",
+  "regex_expressions",
+  "string_expressions",
+  "unicode_expressions",
+  "compression",
+  "parquet",
+  "recursive_protection",
+] }
 datafusion-common = { version = "54" }
 datafusion-common-runtime = { version = "54" }
 datafusion-session = { version = "54" }
 datafusion-catalog-listing = { version = "54" }
-datafusion-expr = { version = "54" }
+datafusion-expr = { version = "54", default-features = false }
 datafusion-physical-expr = { version = "54" }
 datafusion-physical-plan = { version = "54" }
 datafusion-execution = { version = "54" }
