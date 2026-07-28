@@ -19,10 +19,12 @@ use object_store::{ObjectStoreExt, path::Path};
 use rootcause::{bail, report};
 use tokio::sync::mpsc::Sender;
 
+#[cfg(feature = "vortex")]
+use crate::file_format::vortex::VortexSink;
 use crate::{
     Result,
     constant::DEFAULT_PARTITION_DESC,
-    file_format::{PhysicalFormat, vortex::VortexSink},
+    file_format::PhysicalFormat,
     helpers::{
         FileExistCols, get_batch_memory_size,
         transform::{uniform_record_batch, uniform_schema},
@@ -136,12 +138,17 @@ impl FileSinkWriter {
                     .ok_or(report!("downcast ParquetSink failed"))?;
                 self.collect_parquet_outputs(sink).await
             }
+            #[cfg(feature = "vortex")]
             PhysicalFormat::Vortex | PhysicalFormat::VortexCompact => {
                 let sink = self
                     .downcast_sink::<VortexSink>()
                     .ok_or(report!("downcast VortexSink failed"))?;
                 self.collect_vortex_outputs(sink).await
             }
+            #[cfg(not(feature = "vortex"))]
+            PhysicalFormat::Vortex | PhysicalFormat::VortexCompact => Err(report!(
+                "vortex physical format requires the `vortex` feature"
+            )),
         }
     }
 
@@ -184,6 +191,7 @@ impl FileSinkWriter {
         .await
     }
 
+    #[cfg(feature = "vortex")]
     async fn collect_vortex_outputs(
         &self,
         sink: &VortexSink,
