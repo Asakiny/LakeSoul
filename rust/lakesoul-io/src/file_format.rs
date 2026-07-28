@@ -9,6 +9,7 @@ use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
 
+#[cfg(feature = "vortex")]
 use ::vortex::{VortexSessionDefault, session::VortexSession};
 use arrow::datatypes::SchemaRef;
 use arrow_cast::can_cast_types;
@@ -34,12 +35,14 @@ use object_store::{ObjectMeta, ObjectStore};
 use parquet::arrow::parquet_to_arrow_schema;
 use rootcause::compat::boxed_error::IntoBoxedError;
 use rootcause::{Report, bail, report};
+#[cfg(feature = "vortex")]
 use vortex_datafusion::{VortexFormat, VortexTableOptions};
 
 use crate::Result;
 use crate::config::LakeSoulIOConfig;
 use crate::physical_plan::merge::MergeParquetExec;
 
+#[cfg(feature = "vortex")]
 pub(crate) mod vortex;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +103,7 @@ impl FromStr for PhysicalFormat {
 #[derive(Debug)]
 pub struct LakeSoulFormatRegistry {
     parquet: Arc<LakeSoulParquetFormat>,
+    #[cfg(feature = "vortex")]
     vortex: Arc<LakeSoulVortexFormat>,
 }
 
@@ -114,22 +118,25 @@ impl LakeSoulFormatRegistry {
             ),
             io_config.clone(),
         ));
-        let opts = {
+        #[cfg(feature = "vortex")]
+        let vortex = {
             let mut opts = VortexTableOptions::default();
             opts.projection_pushdown = true;
             opts.predicate_pushdown = true;
-            opts
+            Arc::new(LakeSoulVortexFormat::new(
+                Arc::new(VortexFormat::new_with_options(
+                    VortexSession::default(),
+                    opts,
+                )),
+                io_config,
+            ))
         };
 
-        let vortex = Arc::new(LakeSoulVortexFormat::new(
-            Arc::new(VortexFormat::new_with_options(
-                VortexSession::default(),
-                opts,
-            )),
-            io_config,
-        ));
-
-        Ok(Self { parquet, vortex })
+        Ok(Self {
+            parquet,
+            #[cfg(feature = "vortex")]
+            vortex,
+        })
     }
 
     pub fn physical_format_for_path(&self, path: &str) -> Result<PhysicalFormat> {
@@ -139,7 +146,12 @@ impl LakeSoulFormatRegistry {
     pub fn file_format(&self, physical_format: PhysicalFormat) -> Arc<dyn FileFormat> {
         match physical_format {
             PhysicalFormat::Parquet => self.parquet.clone(),
+            #[cfg(feature = "vortex")]
             PhysicalFormat::Vortex | PhysicalFormat::VortexCompact => self.vortex.clone(),
+            #[cfg(not(feature = "vortex"))]
+            PhysicalFormat::Vortex | PhysicalFormat::VortexCompact => {
+                panic!("vortex physical format requires the `vortex` feature")
+            }
         }
     }
 
@@ -342,12 +354,14 @@ impl FileFormat for LakeSoulParquetFormat {
 /// cast to each other (for example `Int32` and `Int64`). Keep the Vortex path
 /// aligned with that behavior by inferring every file schema independently and
 /// merging with `CanCastSchemaBuilder`.
+#[cfg(feature = "vortex")]
 #[derive(Debug, Clone)]
 pub struct LakeSoulVortexFormat {
     vortex_format: Arc<VortexFormat>,
     io_config: LakeSoulIOConfig,
 }
 
+#[cfg(feature = "vortex")]
 impl LakeSoulVortexFormat {
     pub fn new(vortex_format: Arc<VortexFormat>, io_config: LakeSoulIOConfig) -> Self {
         Self {
@@ -357,6 +371,7 @@ impl LakeSoulVortexFormat {
     }
 }
 
+#[cfg(feature = "vortex")]
 #[async_trait]
 impl FileFormat for LakeSoulVortexFormat {
     fn get_ext(&self) -> String {

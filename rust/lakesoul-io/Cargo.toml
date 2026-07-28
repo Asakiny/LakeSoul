@@ -52,9 +52,10 @@ arrow-buffer = { workspace = true }
 arrow-cast = { workspace = true }
 parquet = { workspace = true }
 object_store = { workspace = true }
-# vortex
-vortex = { workspace = true }
-vortex-datafusion = { workspace = true}
+# vortex (optional: yanked 0.76; gate behind `vortex` feature so the
+# parquet-only merge-on-read path compiles without it)
+vortex = { workspace = true, optional = true }
+vortex-datafusion = { workspace = true, optional = true }
 
 # async
 futures = { workspace = true }
@@ -123,6 +124,7 @@ jemalloc_pprof = { version = "0.8", features = ["flamegraph"], optional = true }
 
 [features]
 hdfs = ["dep:hdrs", "dep:hdfs-sys"]
+vortex = ["dep:vortex", "dep:vortex-datafusion"]
 default = []
 dhat-heap = ["dep:dhat"] # if you are doing heap profiling
 dhat-ad-hoc = [] # if you are doing ad hoc profiling

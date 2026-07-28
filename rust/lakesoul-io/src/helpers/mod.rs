@@ -46,6 +46,7 @@ use std::iter::zip;
 use std::{collections::HashMap, fmt, sync::Arc};
 use tokio::runtime::Builder;
 use url::Url;
+#[cfg(feature = "vortex")]
 use vortex::file::Footer;
 
 use self::transform::uniform_schema;
@@ -909,6 +910,7 @@ impl FileExistCols for ParquetMetaData {
     }
 }
 
+#[cfg(feature = "vortex")]
 impl FileExistCols for Footer {
     fn get_file_exists_cols(&self) -> Vec<String> {
         match self.dtype().as_struct_fields_opt() {
