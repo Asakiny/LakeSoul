@@ -317,3 +317,14 @@ Do not leave review comments on `Cargo.lock` unless:
 
 For normal code reviews, treat `Cargo.lock` changes as generated dependency-resolution output.
 Focus review comments on source code, build configuration, tests, and public API behavior.
+
+## Cursor Cloud specific instructions
+
+Rust workspace 在 Cursor Cloud VM 上的非显然要点（构建产物、依赖、坑）：
+
+- **构建产物目录是 `rust/target/`**（根 `.cargo/config.toml` 设了 `target-dir = "rust/target"` 且 `-Ctarget-feature=+avx2`），不要去 `target/` 找二进制/库。
+- **`protoc` 必需**（`build.rs` 代码生成），VM 需安装 `protobuf-compiler`。
+- **`-lstdc++` 链接坑**：部分 C++ 依赖（如 vortex 相关）链接 `stdc++`，而 `rust-lld` 默认不搜索 gcc 目录，会报 `rust-lld: error: unable to find library -lstdc++`。修复：安装 `g++`/`libstdc++-13-dev` 并确保存在标准符号链接 `/usr/lib/x86_64-linux-gnu/libstdc++.so`（指向 `libstdc++.so.6`）。
+- **Rust ≥ 1.96**（edition 2024）；`rust-toolchain.toml` 为 `stable`，`rustup default stable` 即可。
+- **测试/运行需 PostgreSQL**：默认连接 `host=127.0.0.1 port=5432 dbname=lakesoul_test user=lakesoul_test password=lakesoul_test`（`MetaDataClient::from_env`）。云内用宿主机原生 PG（`sudo service postgresql start`），用 `script/meta_init.sql` 初始化 8 张元数据表。可用环境变量 `LAKESOUL_PG_URL`/`LAKESOUL_PG_USERNAME`/`LAKESOUL_PG_PASSWORD` 覆盖。
+- **快速验证 DataFusion 核心端到端**（无需 JVM/S3）：`cargo build -p lakesoul-console`，写一个 `CREATE EXTERNAL TABLE ... STORED AS LAKESOUL LOCATION 'file:///tmp/...'` + `INSERT` + `SELECT` 的 SQL，用 `./rust/target/debug/lakesoul-console --file <sql>` 跑。`lakesoul-console` 还带 `tpch-gen` 子命令生成 TPC-H 数据。
