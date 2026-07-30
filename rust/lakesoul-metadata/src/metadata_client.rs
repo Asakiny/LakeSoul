@@ -594,6 +594,18 @@ impl MetaDataClient {
                     new_partition_list.push(cur_partition_info);
                 }
 
+                // Trailing sentinel: TransactionInsertPartitionInfo pops the last
+                // entry and marks its snapshot UUIDs as committed (JVM snapshotContainer).
+                let commit_ids = meta_info
+                    .list_partition
+                    .iter()
+                    .flat_map(|p| p.snapshot.clone())
+                    .collect::<Vec<_>>();
+                new_partition_list.push(PartitionInfo {
+                    snapshot: commit_ids,
+                    ..Default::default()
+                });
+
                 self.transaction_insert_partition_info(new_partition_list)
                     .await?;
                 Ok(())
@@ -627,6 +639,10 @@ impl MetaDataClient {
 
                     new_partition_list.push(cur_partition_info);
                 }
+
+                new_partition_list.push(PartitionInfo {
+                    ..Default::default()
+                });
 
                 self.transaction_insert_partition_info(new_partition_list)
                     .await?;
@@ -787,6 +803,71 @@ impl MetaDataClient {
                 ..Default::default()
             },
             commit_op,
+        )
+        .await
+    }
+
+    /// Whole-table (or listed-partition) overwrite: replace snapshot via UpdateCommit.
+    ///
+    /// Unlike [`Self::commit_data_files_with_commit_op`], this:
+    /// - allows `files` to be empty (clears the partition snapshot);
+    /// - always populates `MetaInfo.read_partition_info` from current partitions so
+    ///   `UpdateCommit` replaces rather than hitting the unfinished conflict branch.
+    pub async fn commit_overwrite_data_files(
+        &self,
+        table_name: &str,
+        namespace: &str,
+        files: Vec<DataFileInfo>,
+    ) -> Result<()> {
+        let table_info = self
+            .get_table_info_by_table_name(table_name, namespace)
+            .await?
+            .ok_or_else(|| {
+                LakeSoulMetaDataError::NotFound(format!(
+                    "table {table_name} is not found in namespace {namespace}"
+                ))
+            })?;
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| LakeSoulMetaDataError::Internal(error.to_string()))?
+            .as_millis() as i64;
+        let domain = self.get_table_domain(&table_info.table_id).await?.domain;
+        let read_partition_info = self
+            .get_all_partition_info(table_info.table_id.as_str())
+            .await?;
+
+        let data_commit_info_list = if files.is_empty() {
+            Vec::new()
+        } else {
+            data_commit_info_list_from_files(
+                &table_info,
+                files.clone(),
+                CommitOp::UpdateCommit,
+                timestamp,
+                &domain,
+            )
+        };
+        let list_partition = overwrite_list_partition(
+            &table_info.table_id,
+            &domain,
+            &files,
+            &read_partition_info,
+            &data_commit_info_list,
+        );
+
+        if !data_commit_info_list.is_empty() {
+            self.transaction_insert_data_commit_info(data_commit_info_list)
+                .await?;
+        }
+
+        self.commit_data(
+            MetaInfo {
+                table_info: Some(table_info),
+                list_partition,
+                read_partition_info,
+                ..Default::default()
+            },
+            CommitOp::UpdateCommit,
         )
         .await
     }
@@ -1204,6 +1285,52 @@ pub fn table_path_id_from_table_info(table_info: &TableInfo) -> TablePathId {
     }
 }
 
+/// Build `list_partition` for an overwrite commit.
+///
+/// Empty `files` clears every currently known partition (or the default non-range
+/// partition `"-5"` when the table has never been written).
+fn overwrite_list_partition(
+    table_id: &str,
+    domain: &str,
+    files: &[DataFileInfo],
+    read_partition_info: &[PartitionInfo],
+    data_commits: &[DataCommitInfo],
+) -> Vec<PartitionInfo> {
+    const NON_PARTITION_DESC: &str = "-5";
+    if files.is_empty() {
+        let descs: Vec<String> = if read_partition_info.is_empty() {
+            vec![NON_PARTITION_DESC.to_string()]
+        } else {
+            read_partition_info
+                .iter()
+                .map(|p| p.partition_desc.clone())
+                .collect()
+        };
+        return descs
+            .into_iter()
+            .map(|partition_desc| PartitionInfo {
+                table_id: table_id.to_string(),
+                partition_desc,
+                commit_op: CommitOp::UpdateCommit.into(),
+                domain: domain.to_string(),
+                snapshot: vec![],
+                ..Default::default()
+            })
+            .collect();
+    }
+    data_commits
+        .iter()
+        .map(|c| PartitionInfo {
+            table_id: table_id.to_string(),
+            partition_desc: c.partition_desc.clone(),
+            commit_op: CommitOp::UpdateCommit.into(),
+            domain: domain.to_string(),
+            snapshot: c.commit_id.into_iter().collect(),
+            ..Default::default()
+        })
+        .collect()
+}
+
 fn data_commit_info_list_from_files(
     table_info: &TableInfo,
     files: Vec<DataFileInfo>,
@@ -1306,5 +1433,35 @@ mod tests {
         assert_eq!(commits[0].timestamp, 123);
         assert_eq!(commits[0].domain, "public");
         assert!(commits.iter().all(|commit| commit.commit_id.is_some()));
+    }
+
+    #[test]
+    fn empty_overwrite_clears_default_partition_snapshot() {
+        let parts = overwrite_list_partition("tid", "public", &[], &[], &[]);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].partition_desc, "-5");
+        assert!(parts[0].snapshot.is_empty());
+        assert_eq!(parts[0].commit_op(), CommitOp::UpdateCommit);
+    }
+
+    #[test]
+    fn empty_overwrite_clears_all_read_partitions() {
+        let read = vec![
+            PartitionInfo {
+                partition_desc: "-5".to_string(),
+                version: 3,
+                ..Default::default()
+            },
+            PartitionInfo {
+                partition_desc: "dt=2024".to_string(),
+                version: 1,
+                ..Default::default()
+            },
+        ];
+        let parts = overwrite_list_partition("tid", "public", &[], &read, &[]);
+        assert_eq!(parts.len(), 2);
+        assert!(parts.iter().all(|p| p.snapshot.is_empty()));
+        assert_eq!(parts[0].partition_desc, "-5");
+        assert_eq!(parts[1].partition_desc, "dt=2024");
     }
 }
