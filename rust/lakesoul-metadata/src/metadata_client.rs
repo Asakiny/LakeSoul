@@ -594,6 +594,18 @@ impl MetaDataClient {
                     new_partition_list.push(cur_partition_info);
                 }
 
+                // Trailing sentinel: TransactionInsertPartitionInfo pops the last
+                // entry and marks its snapshot UUIDs as committed (JVM snapshotContainer).
+                let commit_ids = meta_info
+                    .list_partition
+                    .iter()
+                    .flat_map(|p| p.snapshot.clone())
+                    .collect::<Vec<_>>();
+                new_partition_list.push(PartitionInfo {
+                    snapshot: commit_ids,
+                    ..Default::default()
+                });
+
                 self.transaction_insert_partition_info(new_partition_list)
                     .await?;
                 Ok(())
@@ -627,6 +639,10 @@ impl MetaDataClient {
 
                     new_partition_list.push(cur_partition_info);
                 }
+
+                new_partition_list.push(PartitionInfo {
+                    ..Default::default()
+                });
 
                 self.transaction_insert_partition_info(new_partition_list)
                     .await?;
