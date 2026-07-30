@@ -320,6 +320,12 @@ Focus review comments on source code, build configuration, tests, and public API
 
 ## Cursor Cloud specific instructions
 
+### 分支策略（强制）
+
+- **日常开发 / 功能 PR 一律合入 `dev`**（`base_branch=dev`）。
+- **`main` 不作功能合并目标**：仅用于同步官方上游最新提交（fetch/rebase/cherry 官方代码），不要把 `cursor/*` 功能 PR merge 进 `main`。
+- 本地默认工作分支：`dev`。Sail path-dep 的 LakeSoul 也跟 `dev`。
+
 Rust workspace 在 Cursor Cloud VM 上的非显然要点（构建产物、依赖、坑）：
 
 - **构建产物目录是 `rust/target/`**（根 `.cargo/config.toml` 设了 `target-dir = "rust/target"` 且 `-Ctarget-feature=+avx2`），不要去 `target/` 找二进制/库。
