@@ -323,8 +323,13 @@ Focus review comments on source code, build configuration, tests, and public API
 ### 分支策略（强制）
 
 - **日常开发 / 功能 PR 一律合入 `dev`**（`base_branch=dev`）。
-- **`main` 不作功能合并目标**：仅用于同步官方上游最新提交（fetch/rebase/cherry 官方代码），不要把 `cursor/*` 功能 PR merge 进 `main`。
+- **`main` 不作功能合并目标**：仅用于同步官方上游最新提交（fetch/rebase/cherry 官方代码），不要把功能 PR merge 进 `main`。
 - 本地默认工作分支：`dev`。Sail path-dep 的 LakeSoul 也跟 `dev`。
+- **分支命名（语义前缀，不再使用 `cursor/`）：**
+  - `feature/<short-description>` — 新能力
+  - `bugfix/<short-description>` — 缺陷修复
+  - `docs/<short-description>` — 文档/设计
+  - `chore/<short-description>` — 杂项/卫生
 
 Rust workspace 在 Cursor Cloud VM 上的非显然要点（构建产物、依赖、坑）：
 
